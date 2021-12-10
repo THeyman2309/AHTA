@@ -1,0 +1,237 @@
+---
+title: "GSE143893"
+author: "ukke"
+date: "6 december 2021"
+output: html_document
+---
+
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(fig.align = 'center')
+knitr::opts_chunk$set(out.width = '60%')
+knitr::opts_chunk$set(fig.width=12, fig.height=8)
+
+
+library("mogene10sttranscriptcluster.db")
+library("ArrayExpress")
+library("arrayQualityMetrics")
+library("ggplot2")
+#library("huex10sttranscriptcluster.db")
+library("limma")
+library("oligo")
+library("siggenes")
+library("affy")
+#library("pd.huex.1.0.st.v2")
+
+library("wateRmelon")
+```
+
+```{r}
+library(affy)
+library(arrayQualityMetrics)
+library(ArrayExpress)
+library(limma)
+library(siggenes)
+```
+
+
+# Methylation Data
+
+We selected the dataset with accession number GSE143893 as a methylation dataset. This data contains Whole Genome Bisulfite Sequencing of CD4+ T cells from mice developmentally exposed to vehicle or TCDD prior to and during influenza infection. We loaded only samples from mice that were not treated with TCDD.
+
+## General info
+Methylation profiling by high throughput sequencing:GSE143893
+We selected the dataset with accession number GSE143893 as a methylation dataset. This data contains Whole Genome Bisulfite Sequencing of CD4+ T cells from mice developmentally exposed to vehicle or TCDD prior to and during influenza infection. We loaded only samples from mice that were not treated with TCDD.
+
+
+## Intensity values
+
+loading in the data
+```{r, silent=T}
+library(methylKit)
+file.list=list( "C:/Users/tobia/Documents/AHAT/GSM4276332_Vehicle-Naive1_CpG.txt",
+                "C:/Users/tobia/Documents/AHAT/GSM4276334_Vehicle-Naive2_CpG.txt",
+                "C:/Users/tobia/Documents/AHAT/GSM4276336_Vehicle-Naive3_CpG.txt",
+                "C:/Users/tobia/Documents/AHAT/GSM4276338_Vehicle-Infected1_CpG.txt",
+                "C:/Users/tobia/Documents/AHAT/GSM4276340_Vehicle-Infected2_CpG.txt",
+                "C:/Users/tobia/Documents/AHAT/GSM4276342_Vehicle-Infected3_CpG.txt")
+# read the files to a methylRawList object: myobj immediately filter so that sites supported by less than 10 are not used
+myobj=methRead(file.list,
+           sample.id=list("vehicle_naive1","vehicle_naive2", "vehicle_naive3","vehicle_infected1","vehicle_infected2", "vehicle_infected3"),
+           assembly="GRCm38.p5",
+           treatment=c(0,0,0,1,1,1),
+           context="CpG",
+           mincov = 10
+           )
+head(myobj)
+```
+
+
+###viewing the data
+
+
+View the methylation rates per sample with the plot function that is provided in the package.
+
+```{r}
+naive_1 <- getMethylationStats(myobj[[1]],plot=TRUE,both.strands=FALSE)
+naive_2 <- getMethylationStats(myobj[[2]],plot=TRUE,both.strands=FALSE)
+naive_3 <- getMethylationStats(myobj[[3]],plot=TRUE,both.strands=FALSE)
+infected_1 <- getMethylationStats(myobj[[4]],plot=TRUE,both.strands=FALSE)
+infected_2 <- getMethylationStats(myobj[[5]],plot=TRUE,both.strands=FALSE)
+infected_3 <- getMethylationStats(myobj[[6]],plot=TRUE,both.strands=FALSE)
+```
+
+These plots can not be combined, are quite ugly and difficult to read-> write own funtion
+
+```{r, warning=F, fig.height=20, fig.width=25}
+library(ggplot2)
+methylplot <- function(object){
+ggplot(object, aes(x = numCs / coverage * 100)) +
+  geom_histogram(bins=21, boundary = 0, color = "black", fill = "darkgreen") +
+  stat_bin(bins=21, boundary = 0, geom='text', color='black', aes(label=round((100*(..count..)/length(object$numCs)),1)), vjust = -0.5)+
+  scale_x_continuous(breaks = c(0,20,40,60,80,100))+
+  theme_bw() +
+  xlab("Percent methylation")+
+  ylab("Frequency")+
+  ggtitle(paste("%CpG methylation ", object@sample.id))+
+  theme(plot.title = element_text(hjust = 0.5, size = 14, face = "bold.italic"), axis.title.x = element_text(size = 11, face = "bold"), axis.title.y = element_text(size = 11, face = "bold"))
+}
+
+naive_1 <- methylplot(myobj[[1]])
+naive_2 <- methylplot(myobj[[2]])
+naive_3 <- methylplot(myobj[[3]])
+infected_1 <- methylplot(myobj[[4]])
+infected_2 <- methylplot(myobj[[5]])
+infected_3 <- methylplot(myobj[[6]])
+
+cowplot::plot_grid(naive_1, infected_1, naive_2, infected_2, naive_3, infected_3, labels = c("A", "B", "C", "D", "E", "F"), ncol = 2)
+```
+
+View the coverage rates per sample with the plot function that is provided in the package.
+
+```{r}
+naive_1 <- getCoverageStats(myobj[[1]],plot=TRUE,both.strands=FALSE)
+naive_2 <- getCoverageStats(myobj[[2]],plot=TRUE,both.strands=FALSE)
+naive_3 <- getCoverageStats(myobj[[3]],plot=TRUE,both.strands=FALSE)
+infected_1 <- getCoverageStats(myobj[[4]],plot=TRUE,both.strands=FALSE)
+infected_2 <- getCoverageStats(myobj[[5]],plot=TRUE,both.strands=FALSE)
+infected_3 <- getCoverageStats(myobj[[6]],plot=TRUE,both.strands=FALSE)
+
+```
+
+filtering the data is not necessary because no signs of PCR bias are observed (features with very high coverage). But is strongly recommended by methylkit so....
+```{r}
+# filter out extreme coverage values (top 0.1%)
+filtered <- filterByCoverage(myobj, hi.count = 99.9)
+
+# normalize coverage to to avoid bias introduced by systematically more sequenced samples
+normalized <- normalizeCoverage(filtered)
+```
+
+
+###merging samples
+
+```{r}
+# destrand parameter can be set to TRUE as we're working with base-pair resolution CpG methylation data. This increases coverage
+meth=unite(normalized, destrand=TRUE)
+head(meth)
+```
+
+get the sample correlation
+
+```{r}
+getCorrelation(meth,plot=F)
+```
+
+All samples have a very high correlation rate.
+
+Cluster the samples samples
+```{r}
+clusterSamples(meth, dist="correlation", method="ward")
+```
+
+PCA
+```{r}
+PCASamples(meth)
+```
+
+
+get differentially methylated bases
+```{r}
+myDiff=calculateDiffMeth(meth)
+myDiff25p=getMethylDiff(myDiff,difference=50,qvalue=0.05)
+diffMethPerChr(myDiff,plot=FALSE,qvalue.cutoff=0.05, meth.cutoff=25)
+myDiff25p
+
+Diffmeth <-calculateDiffMeth(meth, overdispersion="MN",test="Chisq")
+Diff25p=getMethylDiff(Diffmeth,difference=50,qvalue=0.05)
+diffMethPerChr(Diffmeth,plot=FALSE,qvalue.cutoff=0.05, meth.cutoff=25)
+
+```
+
+There appear to be a very low number of differentially methylated positions between cells from mice infected with influenza and those that are not infected with influenza. 
+
+### annotating differentially methylated bps
+
+```{r}
+library(genomation)
+# load the hgr18 bed file.
+gene.obj=readTranscriptFeatures("C:/Users/tobia/Documents/AHAT/mm10_RefSeq.bed.gz")
+
+# annotate to promotors, exons, introns.
+diffAnn=annotateWithGeneParts(as(myDiff25p,"GRanges"),gene.obj)
+
+# get associated transcription start sites
+getAssociationWithTSS(diffAnn)
+
+# save features as vector
+features <- c("no feature linked", getAssociationWithTSS(diffAnn)[[3]])
+features
+dist_features <- c(NA, getAssociationWithTSS(diffAnn)[[2]])
+
+summary <- as.data.frame(myDiff25p)
+# add feature information to myDiff25p
+summary$feature <- features
+summary$dist.to.feature <- dist_features
+summary
+
+diffAnn@members
+promoters=regionCounts(normalized,gene.obj$promoters)
+
+head(promoters[[1]])
+
+getTargetAnnotationStats(diffAnn,percentage=TRUE,precedence=TRUE)
+```
+
+same for more stringent
+
+```{r}
+# annotate to promotors, exons, introns.
+diffAnn_str=annotateWithGeneParts(as(Diff25p,"GRanges"),gene.obj)
+
+# get associated transcription start sites
+getAssociationWithTSS(diffAnn_str)
+
+# save features as vector
+features <- c(getAssociationWithTSS(diffAnn_str)[[3]])
+
+dist_features <- c(getAssociationWithTSS(diffAnn_str)[[2]])
+
+summary <- as.data.frame(Diff25p)
+# add feature information to myDiff25p
+summary$feature <- features
+summary$dist.to.feature <- dist_features
+summary
+
+diffAnn_str@members
+
+
+getTargetAnnotationStats(diffAnn_str,percentage=TRUE,precedence=TRUE)
+```
+
+
+
+
+
+
+
