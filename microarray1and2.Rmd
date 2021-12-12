@@ -1,0 +1,618 @@
+---
+title: "microarray1"
+author: "Seoyeon Oh"
+date: "12/11/2021"
+output: html_document
+---
+
+title: "E-GEOD-57452"
+author: "ukke"
+date: "3 december 2021"
+output: html_document
+---
+
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(fig.align = 'center')
+knitr::opts_chunk$set(out.width = '60%')
+knitr::opts_chunk$set(fig.width=12, fig.height=8)
+
+
+library("mogene10sttranscriptcluster.db")
+library("ArrayExpress")
+library("arrayQualityMetrics")
+library("ggplot2")
+library("huex10sttranscriptcluster.db")
+library("limma")
+library("oligo")
+library("siggenes")
+library("affy")
+#library("pd.huex.1.0.st.v2")
+library("wateRmelon")
+library("affy")
+library("arrayQualityMetrics")
+library("ArrayExpress")
+library("RSQLite")
+library("DBI")
+library("htmltools")
+library("biomaRt")
+library("tximport")
+```
+
+
+```{r}
+setwd("/Users/seoyeon/Desktop/MSc Bioinformatics Year 1/Applied High-throughput Analysis/Project/Datasets/")
+```
+
+
+#E-GEOD-57452
+
+### General info
+
+The array used for this dataset is A-AFFY-130 - Affymetrix GeneChip Mouse Gene 1.0 ST Array [MoGene-1_0-st-v1]. Mice were infected with influenza and RNA was extracted from the lungs after 10 days. We used samples involving susceptible mice after 10 days of infection with influenza from this dataset.
+
+### Intensity values
+
+Read in the microarray data and display the head and dimensions of the intensity value matrix.
+```{r, message=F}
+id_1 <- "E-GEOD-57452"
+exonCELs <- list.celfiles("../Datasets/Microarray1")
+data.raw_1 <- read.celfiles(paste(rep("../Datasets/Microarray1/",length(exonCELs)),exonCELs,sep=""))
+```
+
+
+```{r}
+# make vector containing the sample class
+samples <- c(replicate(3, "control"), "day0", "day1", "day2", replicate(2, "day3"), replicate(2, "day4"), replicate(3, "day5"), "day6", replicate(2, "day7"), replicate(2, "day8"), replicate(2, "day9"), replicate(3, "day10")) 
+
+# add the sample classes to the pData object
+pData(data.raw_1)[,2] <- samples 
+
+colnames(pData(data.raw_1)) <- c("index", "treatment")
+
+
+# filter control samples and samples taken after 3 days of infection
+filter <- colnames(data.raw_1)[data.raw_1@phenoData@data$treatment=="control" | data.raw_1@phenoData@data$treatment=="day10"]
+
+# apply filter
+filtered <- data.raw_1[,filter]
+
+# check dimentsions of filtered object
+dim(exprs(filtered))
+```
+
+
+```{r}
+## arrayQualityMetrics 
+arrayQualityMetrics(filtered,outdir="../Datasets/microarray1/raw1",force=T)
+arrayQualityMetrics(filtered,outdir="../Datasets/microarray1/rawlog1",force=T,do.logtransform=T)
+
+# Preprocessing (using the oligo function because affy didnt work)
+MouseRMA<- oligo::rma(filtered,background=T)
+
+## QC post preprocessing
+arrayQualityMetrics(MouseRMA,outdir="../Datasets/microarray1/rma1",force=T)  			#RMA produces log-transformed data
+```
+
+##Data exploration
+
+```{r}
+# transpose the data before PcA as this function requires the variables to b columns
+data <- t(as.data.frame(MouseRMA@assayData$exprs))
+pca <- prcomp(data, center = T, scale. = T)
+
+summary(pca)
+# save as dataframe and add treatment variable
+pca_out <- as.data.frame(pca$x)
+pca_out$treatment <- as.character(MouseRMA@phenoData@data$treatment)
+pca_out$sample <- c("rep1", "rep2", "rep3", "rep1", "rep2", "rep3")
+
+# get lablels
+percentage <- round(pca$sdev / sum(pca$sdev) * 100, 2)
+percentage <- paste( colnames(pca_out), "(", paste( as.character(percentage), "%", ")", sep="") )
+
+ggplot(data = pca_out)+
+  geom_point(aes(x = PC1, y = PC2, colour = treatment, label=sample), size=3)+
+  geom_text(aes(x = PC1, y = PC2, colour = treatment, label=sample),hjust=0.5, vjust=1.15)+
+  theme_bw()+
+  xlab(percentage[1])+
+  ylab(percentage[2])+
+  labs(colour = "treatment")+
+  theme(plot.title = element_text(hjust = 0.5))+
+  scale_colour_manual(values = c("firebrick", "midnightblue"))+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+ggsave("PCA_array1.png", dpi=750, width=8, height = 5)
+```
+
+
+
+determine differential expression
+
+```{r}
+annot <- factor(pData(MouseRMA)[,2])
+
+## Differential expression by LIMMA
+# Method as stated in limma package (no intercept, easy for simple model designs)
+design <- model.matrix(~0+annot)
+colnames(design)<-c("control","infected")
+
+# make linear model
+fit <- lmFit(MouseRMA,design)
+
+# create contrast matrix to get the differential expression between samples from infected mice and uninfected mice 
+cont.matrix <- makeContrasts(NvsS=control-infected,levels=design)
+fit2 <- contrasts.fit(fit,cont.matrix) 
+fit2 <- eBayes(fit2)
+
+# make MA plot for model with applied contrast matrix
+limma::plotMA(fit2)
+```
+
+```{r}
+library(ggplot2)
+# DE results with multiple testing correction (Benjamini-Hochberg = BH)
+LIMMAout <- topTable(fit2,adjust="BH",number=nrow(exprs(MouseRMA)))
+
+
+
+# add column indicating for all differntially expressed genes (adjusted p-value < 0.05) whether they're up- or down-regulated
+
+LIMMAout$diffexpressed <- "NO"
+LIMMAout$diffexpressed[LIMMAout$logFC > 0 & LIMMAout$adj.P.Val < 0.05] <- "UP"
+LIMMAout$diffexpressed[LIMMAout$logFC < 0 & LIMMAout$adj.P.Val < 0.05] <- "DOWN"
+
+# do the same but if we would not correct for multiple testing.
+LIMMAout$diffexpressed_no_BH <- "NO"
+LIMMAout$diffexpressed_no_BH[LIMMAout$logFC > 0 & LIMMAout$P.Value < 0.05] <- "UP"
+LIMMAout$diffexpressed_no_BH[LIMMAout$logFC < 0 & LIMMAout$P.Value < 0.05] <- "DOWN"
+
+# code to make volcano plots
+
+ggplot(data = LIMMAout, aes(x= logFC, y = -log10(adj.P.Val), colour = diffexpressed)) +
+ geom_point()+
+ theme_bw()+
+  geom_hline(yintercept = -log10(0.05), linetype="dashed", color="midnightblue")+
+  annotate("text", min(4), 1.3, vjust = -1, label = "Cutoff", color="midnightblue")+
+ labs(colour = "Differentialy expressed")
+
+ggsave("volcanoplot.png", dpi=750)
+
+ggplot(data = LIMMAout, aes(x= logFC, y = -log10(P.Value), colour = diffexpressed_no_BH)) +
+ geom_point()+
+ theme_bw()+
+  geom_hline(yintercept = -log10(0.05), linetype="dashed", color="midnightblue")+
+  annotate("text", min(4), 1.3, vjust = -1, label = "Cutoff", color="midnightblue")+
+ labs(colour = "Differentialy expressed")
+
+table(LIMMAout$diffexpressed)
+
+```
+
+
+### Annotation
+
+```{r}
+# get the annotation trough package (mogene10sttranscriptcluster.db) found at https://www.biostars.org/p/9477569/
+columns(mogene10sttranscriptcluster.db)
+
+annotTable <- select(
+  mogene10sttranscriptcluster.db,
+  keys = keys(mogene10sttranscriptcluster.db),
+  column = c('PROBEID', 'SYMBOL', 'ENTREZID', 'ENSEMBL', 'GENENAME', 'PROSITE'),
+  keytype = 'PROBEID')
+
+
+## sort annotation data alphabetically on probe name
+
+annotTable.filt <- annotTable[sort(annotTable$PROBEID,index.return=T)$ix,]
+
+# merge information from multiple lines describing the same probe
+probe <- "start"
+position <- 0
+for (i in 1:dim(annotTable.filt)[1]){
+  if (annotTable.filt[i, 1] != probe){
+    probe <- annotTable.filt[i, 1]
+    position <- i
+  }
+  else{
+    # concatenate the information o f the 2 lines with a ; as separator
+    annotTable.filt[position,2:5] <- paste(annotTable.filt[position,2:5], annotTable.filt[i, 2:5], sep="; ")
+    # mark the line 
+    annotTable.filt[i,1] <- NA
+  }
+}
+
+annotTable.filt <- annotTable.filt[!is.na(annotTable.filt$PROBEID),]
+
+## Check if all probes are present in both sets
+dim(annotTable.filt)
+dim(LIMMAout)
+
+ ## Double check => "Assumption is the mother of all fuck up's ;)"
+sum(annotTable.filt$PROBEID!=sort(rownames(LIMMAout)))
+
+## Sort LIMMA output alphabetically on probe name
+LIMMAout_sorted <- LIMMAout[sort(rownames(LIMMAout),index.return=T)$ix,]
+
+
+## Add gene names to LIMMA output
+LIMMAout_sorted$gene <- annotTable.filt$SYMBOL
+LIMMAout_annot <- LIMMAout_sorted[sort(LIMMAout_sorted$adj.P.Val,index.return=T)$ix,]
+LIMMAout_annot[LIMMAout_annot$diffexpressed != "NO",]
+LIMMAout_annot[LIMMAout_annot$diffexpressed != "NO",8]
+
+# determine how many differentially expressed probes have an annotated gene
+table(is.na(LIMMAout_annot[LIMMAout_annot$diffexpressed != "NO",9]))
+
+
+## alternative annotation method:
+
+# annotation file from https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GPL6246
+annotation_MA <- read.delim("./Microarray1/GPL6246.annot",header=T, sep="\t", skip=27, fill=T)
+print(head(annotation_MA))
+annotation_MA <- annotation_MA[sort(annotation_MA$ID,index.return=T)$ix,]
+annotation_MA
+
+dim(annotation_MA)
+dim(LIMMAout)
+
+
+
+## the dimensions don't match but we can still check whether the information for the differentially expressed probes matches using both annotation methods
+
+annotation_MA[annotation_MA$ID %in% rownames(LIMMAout_annot[LIMMAout_annot$diffexpressed != "NO",]),]
+
+
+#get DE genes symbols
+DEgenes_symbols1 <- unique(annotation_MA[annotation_MA$ID %in% rownames(LIMMAout_annot[LIMMAout_annot$diffexpressed != "NO",]) 
+              & annotation_MA$Gene.symbol != "",]$Gene.symbol)
+head(DEgenes_symbols1)
+```
+
+
+
+---
+title: "microarray2"
+author: "Seoyeon Oh"
+date: "12/8/2021"
+output: html_document
+---
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(fig.align = 'center')
+knitr::opts_chunk$set(out.width = '60%')
+knitr::opts_chunk$set(fig.width=12, fig.height=8)
+
+#library("mogene10sttranscriptcluster.db")
+library("ArrayExpress")
+library("arrayQualityMetrics")
+library("ggplot2")
+#library("huex10sttranscriptcluster.db")
+library("limma")
+library("oligo")
+library("siggenes")
+library("affy")
+#library("pd.huex.1.0.st.v2")
+library("RSQLite")
+library("DBI")
+library("htmltools")
+library("biomaRt")
+library("tximport")
+library("wateRmelon")
+```
+
+
+##E-GEOD-64750
+
+### General info
+
+The array used for this dataset is A-AFFY-45 - Affymetrix GeneChip Mouse Genome 430 2.0 [Mouse430_2]. In this experiment, susceptible mice were infected with H5N1 influenza. After 72h RNA was extracted from the lungs of the mice. We used 9 samples of this experiment (susceptible mice).
+
+### Intensity values
+Read in the microarray data and examine dimensionsionality of the intensity value matrix.
+
+```{r, message=F}
+id <- "E-GEOD-64750"
+exonCELs <- list.celfiles("../Datasets/Microarray2/")
+data.raw_2 <- read.celfiles(paste(rep("../Datasets/Microarray2/",length(exonCELs)),exonCELs,sep=""))
+```
+
+```{r}
+dim(exprs(data.raw_2))
+```
+
+```{r}
+head(exprs(data.raw_2))
+```
+
+### Annotation
+
+Here we provide basic sample annotation, including the phenotype of interest and relevant other features (e.g. confounders). This dataset contains array data (A-AFFY-45) of different mice strains (BXD98, BXD97, BXD83, BXD73, BXD68, BXD67 ,BXD43, C57BL/6J, DBA/2J) infected with influenza virus H5N1.
+
+```{r}
+sdrf <- read.delim("./Microarray2/E-GEOD-64750.sdrf.txt")
+print(sdrf[,c("Source.Name","Comment..Sample_source_name.","Array.Design.REF", "Characteristics..strain.", "Comment..Sample_description.")])
+```
+
+###Which samples we are using, and not using:
+We will be using samples involving susceptible and resistant mouse strain, DBA/2J (GSM1579245 - GSM1579253) and C57BL/6J (GSM1579254 - GSM1579260) respectively. Each strain was inoculated with H5N1 influenza A virus. We are not using the data from other strains (BXD98, BXD97, BXD83, BXD73, BXD68, BXD67, BXD43) which do not contain non-infected control samples.
+
+```{r}
+#Load in the ExpressionFeatureSet object
+MouseExp_AE2 <- ArrayExpress("E-GEOD-64750")
+```
+
+```{r}
+#Load in the Affybatch object
+setwd("../Datasets/Microarray2")
+MouseExp_pheno2 <- ReadAffy(phenoData=pData(MouseExp_AE2))
+```
+
+```{r}
+#load first lines of output from the object
+head(exprs(MouseExp_pheno2))  
+pData(MouseExp_pheno2)  #source name, comment sample description, sample source name, sample title, characteristics, organism, term.source, accession number, sex ...
+```
+
+```{r}
+filter2 <- colnames(data.raw_2)[data.raw_2@phenoData@data$index <= 16]
+filter2
+
+filtered2 <- data.raw_2[,filter]
+filtered2
+
+dim(exprs(filtered))  #1004004 features       9 samples
+```
+
+```{r}
+head(exprs(filtered))
+
+arrayQualityMetrics(filtered,outdir="./raw2",force=T)
+
+arrayQualityMetrics(filteredD,outdir="./rawlog2",force=T,do.logtransform=T)
+
+miceRMA <- oligo::rma(filtered, background=T)
+miceRMA
+
+arrayQualityMetrics(miceRMA, outdir="./rma2", force=TRUE)
+```
+
+```{r}
+## Differential expression analysis with RMA preprocessed data
+####################
+
+## Additional preprocessing
+samples <- c(replicate(5, "DBA/2J control"), replicate(4, "DBA/2J infected"), replicate(3, "C57/BL6J control"), replicate(4, "C57/BL6J infected"))
+samples
+
+condition <- c(replicate(5, "control"), replicate(4, "infected"), replicate(3, "control"), replicate(4, "infected"))
+
+pData(miceRMA)[,2] <- condition
+pData(miceRMA)[,3] <- c(replicate(9, "DBA/2J"), replicate(7, "C57/BL6J"))
+pData(miceRMA)[,4] <- samples
+
+colnames(pData(miceRMA)) <- c("index", "condition", "strain", "samples")
+pData(miceRMA)
+```
+
+The variability of the strain is encompassed in the model but you do not test for it
+```{r}
+condition <- factor(pData(miceRMA)[,2])
+strain <- factor(pData(miceRMA)[,3])
+condition
+strain
+```
+
+```{r}
+design <- model.matrix(~0+condition*strain)
+colnames(design)<-c("Control","Infected", "strain","interaction")
+# for strain, 1 represents DBA/2J, 0 represents c57/BL6
+design
+```
+```{r}
+fit_m2 <- lmFit(miceRMA, design)
+cont.matrix <- makeContrasts(InfectedvsControl="Infected-Control", levels=design)
+cont.matrix
+
+fit2_m2 <- contrasts.fit(fit,cont.matrix) 
+fit2_m2 <- eBayes(fit2)
+fit2_m2
+
+volcanoplot(fit2_m2)
+limma::plotMA(fit2_m2)
+```
+```{r}
+# DE results
+LIMMAout2 <- topTable(fit2_m2,adjust="BH",number=nrow(exprs(miceRMA)))
+#head(LIMMAout)
+
+## Check intensity values for top results
+exprs(miceRMA)[rownames(exprs(miceRMA))%in%rownames(head(LIMMAout2)),]
+```
+
+```{r}
+#mean expression of control/DBA2J
+rowMeans(exprs(miceRMA)[rownames(exprs(miceRMA))%in%rownames(head(LIMMAout2)),1:5])
+
+#mean expression of infected/DBA2J
+rowMeans(exprs(miceRMA)[rownames(exprs(miceRMA))%in%rownames(head(LIMMAout2)),6:9])
+
+#mean expression of control/C57BL6
+rowMeans(exprs(miceRMA)[rownames(exprs(miceRMA))%in%rownames(head(LIMMAout2)),10:12])
+
+#mean expression of infected/C57BL6
+rowMeans(exprs(miceRMA)[rownames(exprs(miceRMA))%in%rownames(head(LIMMAout2)),13:16])
+
+```
+
+
+```{r}
+#Adjustments on p values using Benjamini-Hochberg
+LIMMAout2$diffexpressed <- "NO"
+LIMMAout2$diffexpressed[LIMMAout2$logFC > 0 & LIMMAout2$adj.P.Val < 0.05] <- "UP"
+LIMMAout2$diffexpressed[LIMMAout2$logFC < 0 & LIMMAout2$adj.P.Val < 0.05] <- "DOWN"
+
+#No adjustments on pvalues
+LIMMAout2$diffexpressed_no_BH <- "NO"
+LIMMAout2$diffexpressed_no_BH[LIMMAout2$logFC > 0 & LIMMAout2$P.Value < 0.05] <- "UP"
+LIMMAout2$diffexpressed_no_BH[LIMMAout2$logFC < 0 & LIMMAout2$P.Value < 0.05] <- "DOWN"
+
+
+ggplot(data = LIMMAout2, aes(x= logFC, y = -log10(adj.P.Val), colour = diffexpressed)) +
+ geom_point()+
+ theme_bw()+
+  geom_hline(yintercept = -log10(0.05), linetype="dashed", color="midnightblue")+
+  annotate("text", min(4), 1.3, vjust = -1, label = "Cutoff", color="midnightblue")+
+ #ggtitle("Differentiall (unadjusted P-value)") +
+ labs(colour = "Differentialy expressed")
+ #theme(plot.title = element_text(hjust = 0.5, face = "bold.italic"))
+
+ggplot(data = LIMMAout2, aes(x= logFC, y = -log10(P.Value), colour = diffexpressed_no_BH)) +
+ geom_point()+
+ theme_bw()+
+  geom_hline(yintercept = -log10(0.05), linetype="dashed", color="midnightblue")+
+  annotate("text", min(4), 1.3, vjust = -1, label = "Cutoff", color="midnightblue")+
+ #ggtitle("Differentiall (unadjusted P-value)") +
+ labs(colour = "Differentialy expressed")
+```
+
+```{r}
+length(which(LIMMAout2$diffexpressed=="UP"))   #1324
+length(which(LIMMAout2$diffexpressed=="DOWN")) #1039
+
+length(which(LIMMAout2$diffexpressed_no_BH=="UP"))  #3114
+length(which(LIMMAout2$diffexpressed_no_BH=="DOWN")) #3867
+```
+
+```{r}
+## Load annotation and sort alphabetically on probe name
+setwd("../Datasets/Microarray2/")
+annotation_MA2 <- read.table("A-AFFY-45.adf.txt",header=T,sep="\t",skip=17,fill=T)
+print(head(annotation_MA2))
+annotation_MA2 <- annotation_MA2[sort(annotation_MA2$Composite.Element.Name,index.return=T)$ix,]
+
+## Check if all probes are present in both sets
+dim(annotation_MA2)
+dim(LIMMAout2)
+
+## Double check => "Assumption is the mother of all fuck up's ;)"
+sum(annotation_MA2$Composite.Element.Name==sort(rownames(LIMMAout2)))
+
+## Sort LIMMA output alphabetically on probe name
+LIMMAout_sorted2 <- LIMMAout2[sort(rownames(LIMMAout2),index.return=T)$ix,]
+
+## Add gene names to LIMMA output
+LIMMAout_sorted2$gene <- annotation_MA2$Composite.Element.Database.Entry.ensembl.
+
+LIMMAout_annot2 <- LIMMAout_sorted2[sort(LIMMAout_sorted2$adj.P.Val,index.return=T)$ix,]
+
+#sort by adjusted p value from most significant to least 
+LIMMAout_sorted2 <- LIMMAout_sorted2[order(LIMMAout_sorted2$adj.P.Val, decreasing= F),]
+
+#extract top 50 significant DE genes 
+LIMMAout_sorted2[1:50,]$gene
+
+# Have a look at the results and search for other probesets for your DE genes
+head(LIMMAout_annot2)
+LIMMAout_annot2[LIMMAout_annot2$gene=="	ENSMUSG00000025746",]
+```
+
+```{r}
+ensembl <- useEnsembl(biomart = "genes")
+listDatasets(ensembl)
+searchDatasets(mart = ensembl, pattern = "musculus")
+#mmusculus_gene_ensembl
+```
+
+```{r}
+library('biomaRt')
+mart <- useMart("ENSEMBL_MART_ENSEMBL")
+mart <- useDataset("mmusculus_gene_ensembl", mart)
+
+#ENS <- mapIds(org.Hs.eg.db, gsub(".*\\.","", c(DEgenes), keytype='ENSEMBL', column='SYMBOL'))
+
+ensLookup <- gsub("\\.[0-9]*$", "", c(LIMMAout_sorted2$gene))
+
+annotLookup <- getBM(
+  mart=mart,
+  attributes=c("ensembl_transcript_id", "ensembl_gene_id",
+    "gene_biotype", "external_gene_name"),
+  filter="ensembl_gene_id",
+  values=ensLookup,
+  uniqueRows=TRUE)
+
+#retrieved external gene names 
+#unique(annotLookup$external_gene_name) #11449 genes
+
+#retrieve the list of gene names from the limma output genes
+gene_list <- unique(annotLookup$ensembl_gene_id[annotLookup$ensembl_gene_id %in% LIMMAout_sorted2$gene])
+length(gene_list)
+```
+
+```{r}
+#extract DE genes
+DEgeneIDs <- LIMMAout_sorted2$gene[LIMMAout_sorted2$adj.P.Val <= 0.05]
+DEgeneIDs <- DEgeneIDs[DEgeneIDs != ""]
+DEgeneIDs <- DEgeneIDs[DEgeneIDs%in%unique(annotLookup$ensembl_gene_id)]
+length(DEgeneIDs)
+
+DEgene_symbols2 <- NULL
+for (gene in DEgeneIDs){
+  n <- which(gene == gene_list)
+  DEgene_symbols2 <- c(DEgene_symbols2, unique(annotLookup$external_gene_name)[n])
+}
+
+#top 10 significant DE genes in ENSENBL
+head(DEgene_symbols2, 10)
+head(DEgeneIDs, 10)
+
+DEgene_symbol_and_ID <- cbind(DEgene_symbols2, DEgeneIDs)
+head(DEgene_symbol_and_ID , 10)
+
+#"Ptgs2" %in% DE_genenames  #TRUE
+```
+
+
+
+```{r}
+# transpose the data before PcA as this function requires the variables to b columns
+data <- t(as.data.frame(miceRMA@assayData$exprs))
+pca <- prcomp(data, center = T, scale. = T)
+
+summary(pca)
+# save as dataframe and add treatment variable
+pca_out <- as.data.frame(pca$x)
+
+pca_out$condition <- as.character(miceRMA@phenoData@data$condition)
+pca_out$sample <- c(pData(miceRMA)[,3])
+
+# get lablels
+percentage <- round(pca$sdev / sum(pca$sdev) * 100, 2)
+percentage <- paste( colnames(pca_out), "(", paste( as.character(percentage), "%", ")", sep="") )
+
+ggplot(data = pca_out)+
+  geom_point(aes(x = PC1, y = PC2, colour = condition, label=sample), size=3)+
+  geom_text(aes(x = PC1, y = PC2, colour = condition, label=sample),hjust=0.5, vjust=1.15)+
+  theme_bw()+
+  xlab(percentage[1])+
+  ylab(percentage[2])+
+  labs(colour = "condition")+
+  theme(plot.title = element_text(hjust = 0.5))+
+  scale_colour_manual(values = c("firebrick", "midnightblue"))+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+ggsave("PCA_array2.png", dpi=750, width=8, height = 5)
+```
+
+
+```{r}
+library(ggvenn)
+overlap <-list('microarray1'= DEgenes_symbols1,'microarray2'=DEgene_symbols2)
+
+#Create venn diagram and display all the sets
+ggvenn(overlap)
+
+common_DEgenes <- Reduce(intersect, list(DEgenes_symbols1,DEgene_symbols2))
+common_DEgenes
+```
