@@ -601,7 +601,7 @@ ggplot(data = pca_out)+
   scale_colour_manual(values = c("firebrick", "midnightblue"))+
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
 
-ggsave("PCA_array2.png", dpi=750, width=8, height = 5)
+ggsave("PCA_array2_DBA2J.png", dpi=750, width=8, height = 5)
 ```
 
 
@@ -633,9 +633,38 @@ ggplot(data = pca_out)+
   scale_colour_manual(values = c("firebrick", "midnightblue"))+
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
 
-ggsave("PCA_array2.png", dpi=750, width=8, height = 5)
+ggsave("PCA_array2_C57BL6.png", dpi=750, width=8, height = 5)
 ```
 
+```{r}
+# transpose the data before PcA as this function requires the variables to b columns
+data <- t(as.data.frame(miceRMA@assayData$exprs))
+pca <- prcomp(data, center = T, scale. = T)
+
+summary(pca)
+# save as dataframe and add treatment variable
+pca_out <- as.data.frame(pca$x)
+
+pca_out$condition <- as.character(miceRMA@phenoData@data$condition)
+pca_out$sample <- c(paste0("DBA/2J",1:9), paste0("C57/BL6",1:7))
+# get lablels
+percentage <- round(pca$sdev / sum(pca$sdev) * 100, 2)
+percentage <- paste( colnames(pca_out), "(", paste( as.character(percentage), "%", ")", sep="") )
+
+ggplot(data = pca_out)+
+  ggtitle("DBA/2J vs C57/BL6")+
+  geom_point(aes(x = PC1, y = PC2, colour = condition, label=sample), size=3)+
+  geom_text(aes(x = PC1, y = PC2, colour = condition, label=sample),hjust=0.5, vjust=1.15)+
+  theme_bw()+
+  xlab(percentage[1])+
+  ylab(percentage[2])+
+  labs(colour = "condition")+
+  theme(plot.title = element_text(hjust = 0.5))+
+  scale_colour_manual(values = c("firebrick", "midnightblue"))+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+ggsave("PCA_array2_bothstrains.png", dpi=750, width=8, height = 5)
+```
 
 ```{r}
 library(ggvenn)
