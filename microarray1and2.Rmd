@@ -573,25 +573,56 @@ head(DEgene_symbol_and_ID , 10)
 #"Ptgs2" %in% DE_genenames  #TRUE
 ```
 
-
-
 ```{r}
 # transpose the data before PcA as this function requires the variables to b columns
-data <- t(as.data.frame(miceRMA@assayData$exprs))
+data <- t(as.data.frame(miceRMA@assayData$exprs)[1:9])
 pca <- prcomp(data, center = T, scale. = T)
 
 summary(pca)
 # save as dataframe and add treatment variable
 pca_out <- as.data.frame(pca$x)
 
-pca_out$condition <- as.character(miceRMA@phenoData@data$condition)
-pca_out$sample <- c(pData(miceRMA)[,3])
+pca_out$condition <- as.character(miceRMA@phenoData@data$condition[1:9])
+pca_out$sample <- c(paste0("rep",1:5), paste0("rep",1:4))
 
 # get lablels
 percentage <- round(pca$sdev / sum(pca$sdev) * 100, 2)
 percentage <- paste( colnames(pca_out), "(", paste( as.character(percentage), "%", ")", sep="") )
 
 ggplot(data = pca_out)+
+  ggtitle("DBA/2J susceptible strain")+
+  geom_point(aes(x = PC1, y = PC2, colour = condition, label=sample), size=3)+
+  geom_text(aes(x = PC1, y = PC2, colour = condition, label=sample),hjust=0.5, vjust=1.15)+
+  theme_bw()+
+  xlab(percentage[1])+
+  ylab(percentage[2])+
+  labs(colour = "condition")+
+  theme(plot.title = element_text(hjust = 0.5))+
+  scale_colour_manual(values = c("firebrick", "midnightblue"))+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+ggsave("PCA_array2.png", dpi=750, width=8, height = 5)
+```
+
+
+```{r}
+# transpose the data before PcA as this function requires the variables to b columns
+data <- t(as.data.frame(miceRMA@assayData$exprs)[10:16])
+pca <- prcomp(data, center = T, scale. = T)
+
+summary(pca)
+# save as dataframe and add treatment variable
+pca_out <- as.data.frame(pca$x)
+
+pca_out$condition <- as.character(miceRMA@phenoData@data$condition)[10:16]
+pca_out$sample <- c(paste0("rep",1:3), paste0("rep",1:4))
+
+# get lablels
+percentage <- round(pca$sdev / sum(pca$sdev) * 100, 2)
+percentage <- paste( colnames(pca_out), "(", paste( as.character(percentage), "%", ")", sep="") )
+
+ggplot(data = pca_out)+
+  ggtitle("C57/BL6 resistant strain")+
   geom_point(aes(x = PC1, y = PC2, colour = condition, label=sample), size=3)+
   geom_text(aes(x = PC1, y = PC2, colour = condition, label=sample),hjust=0.5, vjust=1.15)+
   theme_bw()+
