@@ -155,6 +155,50 @@ PCA
 PCASamples(meth)
 ```
 
+This PCA plot is not similar to the other pca-plots we made => make same figure with our figure style.
+
+```{r}
+# preprocessing steps used by methylkit (code obtained from open source scripts on their github)
+mat = getData(meth)
+meth.mat = mat[, meth@numCs.index]/
+  (mat[,meth@numCs.index] + mat[,meth@numTs.index] )                                      
+names(meth.mat)=meth@sample.ids
+
+# remove rows (bases) that are to simillar to avoid error from scale. parameter
+sds=rowSds(as.matrix(meth.mat))
+cutoff=quantile(sds,0.5)
+meth.mat=meth.mat[sds>cutoff,]
+      
+# transpose the data before PcA as this function requires the variables to b columns
+pca <- prcomp(t(meth.mat), center = T, scale. = T) 
+
+
+summary(pca)
+# save as dataframe and add treatment variable
+pca_out <- as.data.frame(pca$x)
+pca_out$treatment <- c("control", "control", "control","infected","infected" ,"infected")
+pca_out$sample <- c("rep1", "rep2", "rep3", "rep1", "rep2", "rep3")
+
+# get lablels
+percentage <- round(pca$sdev / sum(pca$sdev) * 100, 2)
+percentage <- paste( colnames(pca_out), "(", paste( as.character(percentage), "%", ")", sep="") )
+
+ggplot(data = pca_out)+
+  geom_point(aes(x = PC1, y = PC2, colour = treatment, label=sample), size=3)+
+  #geom_text(aes(x = PC1, y = PC2, colour = treatment, label=sample),hjust=0.5, vjust=1.15)+
+  theme_bw()+
+  xlab(percentage[1])+
+  ylab(percentage[2])+
+  labs(colour = "treatment")+
+  theme(plot.title = element_text(hjust = 0.5))+
+  scale_colour_manual(values = c("firebrick", "midnightblue"))+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+ggsave("PCA_WGBS.png", dpi=750, height = 5, width = 8)
+
+```
+
+
 
 get differentially methylated bases
 ```{r}
