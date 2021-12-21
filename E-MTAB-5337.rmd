@@ -1,0 +1,385 @@
+---
+title: "RNA seq dataset E-MTAB-5337"
+author: "Seoyeon Oh, Tobias Heyman"
+date: "12/20/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(error = TRUE)
+```
+
+```{r, error=FALSE}
+library("mogene10sttranscriptcluster.db")
+library("ArrayExpress")
+library("arrayQualityMetrics")
+library("ggplot2")
+library("huex10sttranscriptcluster.db")
+library("limma")
+library("oligo")
+library("siggenes")
+library("affy")
+#library("pd.huex.1.0.st.v2")
+library("wateRmelon")
+library("affy")
+library("arrayQualityMetrics")
+library("ArrayExpress")
+library("RSQLite")
+library("DBI")
+library("htmltools")
+library("biomaRt")
+library("tximport")
+library("edgeR")
+library("rhdf5")
+```
+
+
+
+```{r}
+setwd("/Users/seoyeon/Desktop/MSc Bioinformatics Year 1/Applied High-throughput Analysis/Project/Datasets/")
+```
+
+## RNAseq dataset E-MTAB-5337
+
+RNA-seq of whole lungs from Irgm1-/- and wildtype littermates mice that were either uninfected or infected with influenza for 10 days. Here, we only used wild type 3 infected vs 3 non-infected samples. For each sample, two technical replicates were present (total 12) 
+
+```{r, echo=FALSE}
+htmltools::includeHTML("./RNAseq_output/multiqc_report.html")
+```
+
+```{r}
+setwd("/Users/seoyeon/Desktop/MSc Bioinformatics Year 1/Applied High-throughput Analysis/Project/Datasets/")
+```
+
+```{r}
+## Get file locations
+#ERR1753616 - ERR1753621 : WT, non-infected
+#ERR1753622- ERR1753627: WT, infected 10 dpi
+files1 <- c("/Users/seoyeon/Desktop/MSc Bioinformatics Year 1/Applied High-throughput Analysis/Project/Datasets/RNAseq_output/kallisto_quant/ERR1753616_abundance.tsv",
+            "/Users/seoyeon/Desktop/MSc Bioinformatics Year 1/Applied High-throughput Analysis/Project/Datasets/RNAseq_output/kallisto_quant/ERR1753617_abundance.tsv",
+           "/Users/seoyeon/Desktop/MSc Bioinformatics Year 1/Applied High-throughput Analysis/Project/Datasets/RNAseq_output/kallisto_quant/ERR1753618_abundance.tsv",
+           "/Users/seoyeon/Desktop/MSc Bioinformatics Year 1/Applied High-throughput Analysis/Project/Datasets/RNAseq_output/kallisto_quant/ERR1753619_abundance.tsv",
+           "/Users/seoyeon/Desktop/MSc Bioinformatics Year 1/Applied High-throughput Analysis/Project/Datasets/RNAseq_output/kallisto_quant/ERR1753620_abundance.tsv",
+           "/Users/seoyeon/Desktop/MSc Bioinformatics Year 1/Applied High-throughput Analysis/Project/Datasets/RNAseq_output/kallisto_quant/ERR1753621_abundance.tsv",
+           "/Users/seoyeon/Desktop/MSc Bioinformatics Year 1/Applied High-throughput Analysis/Project/Datasets/RNAseq_output/kallisto_quant/ERR1753622_abundance.tsv",
+           "/Users/seoyeon/Desktop/MSc Bioinformatics Year 1/Applied High-throughput Analysis/Project/Datasets/RNAseq_output/kallisto_quant/ERR1753623_abundance.tsv",
+           "/Users/seoyeon/Desktop/MSc Bioinformatics Year 1/Applied High-throughput Analysis/Project/Datasets/RNAseq_output/kallisto_quant/ERR1753624_abundance.tsv",
+           "/Users/seoyeon/Desktop/MSc Bioinformatics Year 1/Applied High-throughput Analysis/Project/Datasets/RNAseq_output/kallisto_quant/ERR1753625_abundance.tsv",
+           "/Users/seoyeon/Desktop/MSc Bioinformatics Year 1/Applied High-throughput Analysis/Project/Datasets/RNAseq_output/kallisto_quant/ERR1753626_abundance.tsv",
+           "/Users/seoyeon/Desktop/MSc Bioinformatics Year 1/Applied High-throughput Analysis/Project/Datasets/RNAseq_output/kallisto_quant/ERR1753627_abundance.tsv")
+
+tx2gene1 <- read.delim("./mus_musculus_trans2gen.txt")
+#tx2gene1
+
+names(files1) <- paste0("sample", 1:12)
+txi.kallisto <- tximport(files1, type = "kallisto", txOut = FALSE, tx2gene=tx2gene1)
+
+dim(txi.kallisto$counts)
+head(txi.kallisto$length)
+```
+118489 features 12 samples in trascript level.36047 features in gene level. 
+
+```{r}
+sdrf <- read.delim("./RNAseq/E-MTAB-5337.sdrf.txt")
+head(sdrf)
+print(sdrf[,c("Source.Name","Technology.Type", "Characteristics.phenotype.", "Characteristics.organism.part.")])
+```
+
+```{r}
+#get annotation data
+mart = useMart(host="useast.ensembl.org", 
+                 biomart="ENSEMBL_MART_ENSEMBL", 
+                 dataset="mmusculus_gene_ensembl")
+
+mmusculus <- getBM(attributes=c('ensembl_transcript_id',
+                                      'ensembl_gene_id',
+                                      'external_gene_name'),
+                         mart = mart)
+head(mmusculus)
+```
+
+```{r}
+# What are the available attributes
+atr <- listAttributes(mart)
+
+data <- getBM(attributes = c('ensembl_gene_id', 'ensembl_transcript_id',   
+                             'external_gene_name'),
+              mart = mart)
+```
+
+###Which samples we are using, and not using:
+We will only be using samples involving susceptible (Wild Type) after 10 days of infection with influenza.
+
+
+## Check for duplicate rows
+```{r}
+# no duplicate rows
+sum(duplicated(rownames(txi.kallisto$counts)))
+```
+
+```{r}
+setwd("./RNAseq_output")
+```
+
+```{r}
+## Make tpm values compatible with edgeR
+cts <- txi.kallisto$counts
+normMat <- txi.kallisto$length
+head(normMat)
+
+# Obtaining per-observation scaling factors for length, adjusted to avoid
+# changing the magnitude of the counts.
+normMat <- normMat/exp(rowMeans(log(normMat)))
+normCts <- cts/normMat
+head(normCts)
+
+# Computing effective library sizes from scaled counts, to account for
+# composition biases between samples.
+eff.lib <- calcNormFactors(normCts) * colSums(normCts)
+head(eff.lib)
+```
+
+
+```{r}
+# Combining effective library sizes with the length factors, and calculating
+# offsets for a log-link GLM.
+
+#merge every two columns which correspond to each 2 technical replicates
+merged_normMat <- NULL
+for (x in seq(1,12,2)){
+  merged_normMat <- cbind(merged_normMat,normMat[,x]+normMat[,x+1])
+}
+
+normMat <- merged_normMat
+normMat <- sweep(normMat, 2, eff.lib, "*")
+normMat <- log(normMat)
+
+new_cts <- NULL
+for (c in seq(1,12,2)){
+  new_cts <- cbind(new_cts, cts[,c]+cts[,c+1])
+}
+cts <- new_cts
+
+y <- DGEList(cts)
+y <- scaleOffset(y, normMat)
+head(y)
+```
+
+```{r}
+## Library sizes
+infection <- factor(c("10dpi","10dpi","10dpi","control", "control", "control"))
+lib <- NULL
+n <- 1
+for (x in seq(1,12,2)){
+  lib[n] <- eff.lib[x]+ eff.lib[x+1]
+  n <- n + 1
+}
+lib
+
+#jpeg("library_sizes_musmusculus.jpg")
+boxplot(lib~as.factor(infection),xlab="group",ylab="library size")
+#dev.off()
+
+wilcox.test(lib~as.factor(infection))
+```
+
+```{r}
+## Optionally filter on counts mean 
+cutoff <- 3/(mean(y$samples$lib.size)/1000000)
+keep <- rowSums(cpm(y)>cutoff) >= 3
+y <- y[keep,  ,keep.lib.sizes=FALSE]
+summary(keep) #FALSE 15672 TRUE 20375
+```
+
+```{r}
+## MDS plot
+#jpeg("plotMDS_mmusculus.jpg")
+par(mar=c(6,6,6,6))
+plotMDS(y,col=as.numeric(as.factor(infection)), pch=16, main="3 infected vs 3 controls")
+par(xpd=T)
+legend(par("usr")[2]*1.1,par("usr")[4]*0.8,sort(unique(infection)),
+       pch=c(16),col=as.double(as.factor(sort(unique(infection)))))
+#dev.off()
+
+```
+
+```{r}
+## Differential expression analysis
+design <- model.matrix(~infection)
+rownames(design) <- colnames(y)
+
+y <- estimateDisp(y,design)
+#jpeg("BCVplot_mmusculus.jpg")
+plotBCV(y) 
+#dev.off()
+#there is a trend!
+
+fit_edgeR <- glmQLFit(y,design)
+qlf_edgeR <- glmQLFTest(fit_edgeR,coef=2) 
+# coef=2 => infected vs control, see "design" object 
+# note: standard, the last column is considered as the contrast of interest
+res_edgeR <- topTags(qlf_edgeR,n=nrow(qlf_edgeR$table))$table
+```
+
+
+```{r}
+## Add gene symbols 
+data_sorted_edgeR <- data[sort(data$ensembl_transcript_id,index.return=T)$ix,]
+data_sorted_edgeR <- data_sorted_edgeR[duplicated(data_sorted_edgeR$ensembl_gene_id)==F,]
+
+res_edgeR <- cbind(rownames(res_edgeR),res_edgeR)
+colnames(res_edgeR)[1] <- "Ensembl_gene_id"
+
+res_edgeR$diffexpressed <- "NO"
+res_edgeR$diffexpressed[res_edgeR$logFC > 0 & res_edgeR$FDR < 0.05] <- "UP"
+res_edgeR$diffexpressed[res_edgeR$logFC < 0 & res_edgeR$FDR < 0.05] <- "DOWN"
+
+res_edgeR_sorted <- res_edgeR[sort(res_edgeR$Ensembl_gene_id,index.return=T)$ix,]
+head(res_edgeR_sorted)
+
+
+original <- res_edgeR$Ensembl_gene_id
+#substr(original[1], 1, 18)
+n <- 1
+for (id in original){
+  res_edgeR$Ensembl_gene_id[n] <- substr(id, 1, 18)
+  n <- n + 1
+}
+head(res_edgeR$Ensembl_gene_id)
+
+
+ids <- res_edgeR_sorted$Ensembl_gene_id
+#substr(original[1], 1, 18)
+n <- 1
+for (id in ids){
+  res_edgeR_sorted$Ensembl_gene_id[n] <- substr(id, 1, 18)
+  n <- n + 1
+}
+#gsub
+data_sorted_edgeR <- data_sorted_edgeR[data_sorted_edgeR$ensembl_gene_id%in%res_edgeR_sorted$Ensembl_gene_id,]
+res_edgeR_sorted <- res_edgeR_sorted[res_edgeR_sorted$Ensembl_gene_id%in%data_sorted_edgeR$ensembl_gene_id,]
+
+dim(res_edgeR_sorted) #19174
+dim(data_sorted_edgeR) #19174
+#which(res_edgeR_sorted$Ensembl_gene_id == data_sorted_edgeR$ensembl_transcript_id)
+
+res_edgeR_sorted$Gene_symbol <- data_sorted_edgeR$external_gene_name
+
+
+
+## Resort and save results
+res_edgeR <- res_edgeR_sorted[sort(res_edgeR_sorted$PValue,index.return=T)$ix,]
+head(res_edgeR[,c(1,7,2,5,6)],10) #geneID, symbol, logFC, pvalue, FDR
+write.table(res_edgeR,file="res_edgeR_mmusculus.txt",col.names=T,row.names=T,sep="\t",quote=F)
+# top 1000 loci, also contain non-significant loci (filtered out in next step) 
+res_edgeR_sign <- res_edgeR[res_edgeR$FDR<0.05,] 
+dim(res_edgeR_sign)
+# last column of res (ncol(res)) contains FDRs => filtering at 5% level  
+
+
+## MA plot
+jpeg("res_edgeR_mmusuculus_MA.png")
+## MA-plot
+with(res_edgeR,plot(logCPM,logFC,pch=16,cex=0.2)) 
+# MAplot: all data points
+with(res_edgeR,points(logCPM[FDR<0.05],logFC[FDR<0.05],pch=16,col="red",cex=0.6)) 
+# MA-plot: significant loci
+abline(0,0) 
+# X-axis
+dev.off()
+
+
+## Pvalue distribution
+#jpeg("res_edgeR_mmusculus_histogram.jpg")
+hist(res_edgeR$PValue)
+#dev.off()
+
+
+## Plot boxplots for top 20 loci (first make the folder where you want to put them!)
+setwd("./RNAseq_output/Boxplots/")
+counts_k <- txi.kallisto$counts[keep,]
+for (i in 1:20){
+  counts_part <- as.numeric(cpm(y)[rownames(counts_k)==rownames(res_edgeR)[i],])
+  dat_boxplot <- data.frame(counts=counts_part,group=infection)
+  jpeg(paste(i,"_",rownames(res_edgeR)[i],".jpg",sep=""))
+  if (res_edgeR$Gene_symbol[i]!=""){
+    boxplot(counts~group,dat_boxplot,main=paste(rownames(res_edgeR)[i], " (",res_edgeR$Gene_symbol[i],")",sep=""))
+  } else {
+    boxplot(counts~group,dat_boxplot,main=paste(rownames(res_edgeR)[i], " (NA)",sep=""))
+  }
+  dev.off()
+}
+```
+
+```{r}
+RNAseq_DEgenes <- res_edgeR_sign$Gene_symbol
+head(RNAseq_DEgenes)
+length(RNAseq_DEgenes)
+```
+
+
+```{r}
+length(which(res_edgeR$diffexpressed=="UP")) #99
+length(which(res_edgeR$diffexpressed=="DOWN")) #1230
+```
+
+```{r}
+#List all down and upregulated genes for each dataset
+Array1_upregulated <- unique(annotation_MA[annotation_MA$ID %in% rownames(LIMMAout_annot[LIMMAout_annot$diffexpressed == "UP",]) & annotation_MA$Gene.symbol != "",]$Gene.symbol)
+length(Array1_upregulated) #102
+
+Array1_downregulated <- unique(annotation_MA[annotation_MA$ID %in% rownames(LIMMAout_annot[LIMMAout_annot$diffexpressed == "DOWN",]) & annotation_MA$Gene.symbol != "",]$Gene.symbol)
+length(Array1_downregulated)      #357                                  
+
+
+#Microarray2
+Array2_up <- LIMMAout_sorted2$gene[LIMMAout_sorted2$logFC > 1 & LIMMAout_sorted2$adj.P.Val <= 0.05]
+Array2_upregulated <- NULL
+for (gene in Array2_up){
+  n <- which(gene == gene_list)
+  Array2_upregulated <- c(Array2_upregulated, unique(annotLookup$external_gene_name)[n])
+}
+
+Array2_down <- LIMMAout_sorted2$gene[LIMMAout_sorted2$logFC < -1 & LIMMAout_sorted2$adj.P.Val <= 0.05]
+Array2_downregulated <- NULL
+for (gene in Array2_down){
+  n <- which(gene == gene_list)
+  Array2_downregulated <- c(Array2_downregulated, unique(annotLookup$external_gene_name)[n])
+}
+head(Array2_downregulated)
+
+
+RNA_upregulated <- res_edgeR$Gene_symbol[res_edgeR$diffexpressed=="UP"]
+RNA_downregulated <- res_edgeR$Gene_symbol[res_edgeR$diffexpressed=="DOWN"]
+
+```
+
+```{r}
+library(ggvenn)
+overlap <-list('Microarray1'= DEgenes_symbols1,'Microarray2'=DEgene_symbols2, 'RNAseq'=RNAseq_DEgenes)
+
+#Create venn diagram and display all the sets
+ggvenn(overlap, fill_color = c("#CD534CFF", "#EFC000FF", "#0073C2FF")
+)
+
+common_DEgenes <- Reduce(intersect, list(DEgenes_symbols1,DEgene_symbols2, RNAseq_DEgenes))
+array1_RNA <- Reduce(intersect, list(DEgenes_symbols1, RNAseq_DEgenes))
+array1_RNA
+head(common_DEgenes)
+
+```
+
+```{r}
+UP <- list("microarray1U"=Array1_upregulated, "microarray2U"=Array2_upregulated, "RNAseqU"=RNA_upregulated)
+DOWN <- list('microarray1D'= Array1_downregulated, "microarray2D"=Array2_downregulated, "RNAseqD"=RNA_downregulated)
+
+# upregulated genes for all 3 datasets
+ggvenn(UP, fill_color = c("#CD534CFF", "#EFC000FF", "#0073C2FF"))
+common_upreg <- Reduce(intersect, list(Array1_upregulated, Array2_upregulated, RNA_upregulated))
+
+# downregulated genes for all 3 datasets
+ggvenn(DOWN, fill_color = c("#CD534CFF", "#EFC000FF", "#0073C2FF"))
+common_downreg <- Reduce(intersect, list(Array1_downregulated, Array2_downregulated, RNA_downregulated))
+
+```
