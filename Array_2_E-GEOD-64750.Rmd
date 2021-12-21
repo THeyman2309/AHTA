@@ -1,6 +1,6 @@
 ---
-title: "microarray2"
-author: "Seoyeon Oh"
+title: "Microarray2 E-GEOD-64750"
+author: "Seoyeon Oh, Tobias Heyman"
 date: "12/8/2021"
 output: html_document
 ---
