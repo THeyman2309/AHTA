@@ -759,7 +759,6 @@ res_edgeR$diffexpressed[res_edgeR$logFC < 0 & res_edgeR$FDR < 0.05] <- "DOWN"
 res_edgeR_sorted <- res_edgeR[sort(res_edgeR$Ensembl_gene_id,index.return=T)$ix,]
 head(res_edgeR_sorted)
 
-
 original <- res_edgeR$Ensembl_gene_id
 #substr(original[1], 1, 18)
 n <- 1
@@ -800,15 +799,15 @@ dim(res_edgeR_sign)
 
 
 ## MA plot
-jpeg("res_edgeR_mmusuculus_MA.png")
+#jpeg("res_edgeR_mmusuculus_MA.png")
 ## MA-plot
-with(res_edgeR,plot(logCPM,logFC,pch=16,cex=0.2)) 
+with(res_edgeR,plot(logCPM,logFC,pch=16,cex=0.2), title="") 
 # MAplot: all data points
 with(res_edgeR,points(logCPM[FDR<0.05],logFC[FDR<0.05],pch=16,col="red",cex=0.6)) 
 # MA-plot: significant loci
 abline(0,0) 
 # X-axis
-dev.off()
+#dev.off()
 
 
 ## Pvalue distribution
@@ -847,33 +846,55 @@ length(which(res_edgeR$diffexpressed=="DOWN")) #1230
 
 ```{r}
 #List all down and upregulated genes for each dataset
+
+#Microarray1
 Array1_upregulated <- unique(annotation_MA[annotation_MA$ID %in% rownames(LIMMAout_annot[LIMMAout_annot$diffexpressed == "UP",]) & annotation_MA$Gene.symbol != "",]$Gene.symbol)
-length(Array1_upregulated) #102
+
 
 Array1_downregulated <- unique(annotation_MA[annotation_MA$ID %in% rownames(LIMMAout_annot[LIMMAout_annot$diffexpressed == "DOWN",]) & annotation_MA$Gene.symbol != "",]$Gene.symbol)
-length(Array1_downregulated)      #357                                  
-
 
 #Microarray2
-Array2_up <- LIMMAout_sorted2$gene[LIMMAout_sorted2$logFC > 1 & LIMMAout_sorted2$adj.P.Val <= 0.05]
+Array2_up <- unique(LIMMAout_sorted2$gene[LIMMAout_sorted2$logFC > 1 & LIMMAout_sorted2$adj.P.Val <= 0.05])
 Array2_upregulated <- NULL
 for (gene in Array2_up){
   n <- which(gene == gene_list)
+  if (gene != ""){
   Array2_upregulated <- c(Array2_upregulated, unique(annotLookup$external_gene_name)[n])
+  }
 }
 
-Array2_down <- LIMMAout_sorted2$gene[LIMMAout_sorted2$logFC < -1 & LIMMAout_sorted2$adj.P.Val <= 0.05]
+
+Array2_down <- unique(LIMMAout_sorted2$gene[LIMMAout_sorted2$logFC < -1 & LIMMAout_sorted2$adj.P.Val <= 0.05])
 Array2_downregulated <- NULL
 for (gene in Array2_down){
   n <- which(gene == gene_list)
-  Array2_downregulated <- c(Array2_downregulated, unique(annotLookup$external_gene_name)[n])
+  if (gene != ""){
+  Array2_downregulated <- c(Array2_downregulated, unique(annotLookup$external_gene_name)[n])}
 }
+
+#RNAseq
+RNA_upregulated <- unique(res_edgeR$Gene_symbol[res_edgeR$diffexpressed=="UP"])
+RNA_downregulated <- unique(res_edgeR$Gene_symbol[res_edgeR$diffexpressed=="DOWN"])
+```
+
+```{r}
+head(Array1_upregulated)
+length(Array1_upregulated) #102
+
+head(Array1_downregulated)
+length(Array1_downregulated)      #357                                  
+
+head(Array2_upregulated)
+length(Array2_upregulated)
+
 head(Array2_downregulated)
+length(unique(Array2_downregulated))
 
+head(RNA_upregulated)
+length(RNA_upregulated)
 
-RNA_upregulated <- res_edgeR$Gene_symbol[res_edgeR$diffexpressed=="UP"]
-RNA_downregulated <- res_edgeR$Gene_symbol[res_edgeR$diffexpressed=="DOWN"]
-
+head(RNA_downregulated)
+length(RNA_downregulated)
 ```
 
 ```{r}
@@ -888,7 +909,6 @@ common_DEgenes <- Reduce(intersect, list(DEgenes_symbols1,DEgene_symbols2, RNAse
 array1_RNA <- Reduce(intersect, list(DEgenes_symbols1, RNAseq_DEgenes))
 array1_RNA
 head(common_DEgenes)
-
 ```
 
 ```{r}
@@ -903,4 +923,30 @@ common_upreg <- Reduce(intersect, list(Array1_upregulated, Array2_upregulated, R
 ggvenn(DOWN, fill_color = c("#CD534CFF", "#EFC000FF", "#0073C2FF"))
 common_downreg <- Reduce(intersect, list(Array1_downregulated, Array2_downregulated, RNA_downregulated))
 
+```
+
+```{r}
+Array1_RNA_up <- Reduce(intersect, list(Array1_upregulated, RNA_upregulated))
+Array1_RNA_up
+
+Array1_RNA_down <- Reduce(intersect, list(Array1_downregulated, RNA_downregulated))
+Array1_RNA_down
+```
+
+
+```{r}
+# 6 significnt genes for all datasets
+common_DEgenes
+for (x in common_DEgenes){
+  if (x %in% RNAseq_DEgenes){
+    print("UP")
+  }
+  else{
+    print("DOWN")
+  }
+}
+
+#array1 d,d,d,u,u,d
+#array2 u u u d d u
+#rna u u u u u u
 ```
