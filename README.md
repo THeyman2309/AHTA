@@ -1,5 +1,5 @@
 # AHTA
-Repository to make all code available that was used during the project for the course of Applied High-Throughput Analysis
+Repository to make all code available that was used during the project for the course of Applied High-Throughput Analysis at Ghent University, thought by Prof. Dr. Ir. Tim De Meyer and Ir. Louis Coussement.
 
 The code code that was used to analyze a single dataset is available in a document stating with the name of the dataset, followed by its accession number. For every of these files, a knitted (.pdf) version is made available.
 
