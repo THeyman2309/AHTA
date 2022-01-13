@@ -82,6 +82,7 @@ infected_3 <- getMethylationStats(myobj[[6]],plot=TRUE,both.strands=FALSE)
 ```
 
 These plots can not be combined, are quite ugly and difficult to read-> write own funtion
+This is the code that was used to generate supplementary figure 1
 
 ```{r, warning=F, fig.height=20, fig.width=25}
 library(ggplot2)
@@ -117,6 +118,34 @@ infected_1 <- getCoverageStats(myobj[[4]],plot=TRUE,both.strands=FALSE)
 infected_2 <- getCoverageStats(myobj[[5]],plot=TRUE,both.strands=FALSE)
 infected_3 <- getCoverageStats(myobj[[6]],plot=TRUE,both.strands=FALSE)
 
+```
+These plots can not be combined, are quite ugly and difficult to read-> write own funtion
+This is the code that was used to generate supplementary figure 2
+
+```{r, warning=F}
+library(ggplot2)
+coverageplot <- function(object){
+ggplot(object, aes(x = log10(coverage))) +
+  geom_histogram(bins=31, boundary = 1.0, color = "black", fill = "darkgreen") +
+  stat_bin(bins=31, boundary = 1.0, geom='text', color='black', aes(label=round((100*(..count..)/length(object$numCs)),1)), vjust = -0.5)+
+  scale_x_continuous(breaks = c(1.0,1.5,2.0,2.5,3.0,3.5,4.0))+
+  theme_bw() +
+  xlab("Coverage")+
+  ylab("Frequency")+
+  ggtitle(paste("%CpG methylation ", object@sample.id))+
+  theme(plot.title = element_text(hjust = 0.5, size = 14, face = "bold.italic"), axis.title.x = element_text(size = 11, face = "bold"), axis.title.y = element_text(size = 11, face = "bold"))
+}
+
+
+naive_1 <- coverageplot(myobj[[1]])
+naive_2 <- coverageplot(myobj[[2]])
+naive_3 <- coverageplot(myobj[[3]])
+infected_1 <- coverageplot(myobj[[4]])
+infected_2 <- coverageplot(myobj[[5]])
+infected_3 <- coverageplot(myobj[[6]])
+
+cowplot::plot_grid(naive_1, infected_1, naive_2, infected_2, naive_3, infected_3, labels = c("A", "B", "C", "D", "E", "F"), ncol = 2)
+#ggsave("WGBS_coverage.png", dpi=750, height = 15, width = 20)
 ```
 
 filtering the data is not necessary because no signs of PCR bias are observed (features with very high coverage). But is strongly recommended by methylkit so....
